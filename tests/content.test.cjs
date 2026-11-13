@@ -84,3 +84,67 @@ test('does not change non-Markdown source files', () => {
   app.drop(); app.editor.value = url; app.tick();
   assert.equal(app.editor.value, url);
 });
+
+const video = `<video src="${url}"></video>`;
+const photo = '![Screenshot](https://github.com/user-attachments/assets/photo)';
+const table = (a, b) => `| Before | After |\n| --- | --- |\n| ${a} | ${b} |`;
+
+for (const [name, before, after] of [['videos', video, video], ['images', photo, photo], ['mixed media', video, photo], ['HTML images', '<img width="400" src="https://example.com/photo.png">', photo]]) {
+  test(`creates a comparison table for ${name}`, () => {
+    const app = setup('/owner/repo/pull/123');
+    app.editor.value = `Before! ${before}\nAfter! ${after}`;
+    app.tick();
+    assert.equal(app.editor.value, table(before, after));
+    app.tick();
+    assert.equal(app.editor.value, table(before, after));
+  });
+}
+
+test('supports blank lines and media on the following line', () => {
+  const app = setup('/owner/repo/pull/123');
+  app.editor.value = `Intro\nBefore!\n\n${video}\n\nAfter!\n${photo}\nOutro`;
+  app.tick();
+  assert.equal(app.editor.value, `Intro\n\n${table(video, photo)}\n\nOutro`);
+});
+
+test('waits for both uploads and converts video URLs after markers', () => {
+  const app = setup('/owner/repo/pull/123');
+  app.editor.value = 'Before! ';
+  app.drop(); app.editor.value += url; app.tick();
+  assert.equal(app.editor.value, `Before! ${video}`);
+  app.editor.value += '\nAfter! ';
+  app.drop();
+  const second = url + '-second';
+  app.editor.value += second; app.tick(); app.tick();
+  assert.equal(app.editor.value, table(video, `<video src="${second}"></video>`));
+});
+
+for (const value of [
+  `Before! ${video}`, `After! ${photo}\nBefore! ${video}`,
+  `Before! ${video}\nSome text\nAfter! ${photo}`,
+  `Before! [Uploading demo.mp4…]()\nAfter! ${photo}`,
+  `Before! ${url}\nAfter! ${photo}`,
+  '```html\nBefore! '+video+'\nAfter! '+photo+'\n```',
+  '~~~\nBefore! '+video+'\nAfter! '+photo+'\n~~~',
+  `    Before! ${video}\n    After! ${photo}`,
+  `Before! <video src="unfinished">\nAfter! ${photo}`,
+]) {
+  test('preserves incomplete pairs, prose, code and upload placeholders: '+value.slice(0, 45), () => {
+    const app = setup('/owner/repo/pull/123');
+    app.editor.value = value; app.tick(); assert.equal(app.editor.value, value);
+  });
+}
+
+test('escapes table separators in image descriptions', () => {
+  const app = setup('/owner/repo/pull/123');
+  app.editor.value = `Before! ![A | B](https://example.com/a.png)\nAfter! ${photo}`;
+  app.tick();
+  assert.equal(app.editor.value, table('![A \\| B](https://example.com/a.png)', photo));
+});
+
+test('converts multiple pairs without losing surrounding text', () => {
+  const app = setup('/owner/repo/pull/123');
+  app.editor.value = `Before! ${video}\nAfter! ${photo}\n\nBefore! ${photo}\nAfter! ${video}`;
+  app.tick(); app.tick();
+  assert.equal(app.editor.value, table(video, photo)+'\n\n'+table(photo, video));
+});
